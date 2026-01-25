@@ -1,0 +1,51 @@
+INTERNAL RUNBOOK / KNOWLEDGE BASE EXCERPT
+Title: Understanding the Citrix Cloud MCS Provisioning Pipeline (VMware) and Common Failure Modes
+Applies to: Citrix Cloud CVAD + MCS + VMware vSphere via RemoteHCL
+
+High-level pipeline (ideal flow):
+1) Admin starts catalog creation or adds machines in Studio.
+2) DDC/Broker (MCS Orchestration) creates a provisioning job and dispatches per-machine operations.
+3) Cloud Connector communicates with HCL Proxy over WebSocket for provisioning operations.
+4) HCL Proxy calls RemoteHCL over WCF (BeginMachineManagementOperation).
+5) RemoteHCL invokes vCenter APIs (CreateVM_Task, ReconfigVM_Task, etc.) to create VM, attach disks, and apply customization.
+6) RemoteHCL returns completion to Cloud Connector.
+7) Cloud Connector publishes async completion callback to DDC/Broker.
+8) Studio reflects success/failure based on job completion and callbacks.
+
+Common failure pattern: "VM exists in vCenter, but Studio shows Failed"
+Typical causes:
+- Async completion callback not delivered to Broker/DDC (timeout, dropped connection, service restart).
+- Cloud Connector <-> RemoteHCL communication failure (WCF fault, net.tcp connectivity, TLS/cert issues, session disconnect).
+- High concurrency causing internal lock contention, leading to timeouts and channel faults.
+
+How to diagnose quickly:
+A) Confirm whether VM was created in vCenter:
+   - Look for CreateVM_Task and TaskComplete for the machine.
+B) Check RemoteHCL:
+   - Did CreateVmAndAttachDisks complete?
+   - Any RemoteClientDisconnectedException or faults after completion?
+C) Check Cloud Connector:
+   - Any CommunicationObjectFaultedException / timeout around the same timestamp?
+   - Any log lines indicating skipped callback publishing?
+D) Check Broker/DDC:
+   - WaitForCallback timeout (usually ~60s) and subsequent cleanup instructions (DeleteVM).
+
+If Broker times out waiting for callback:
+- Orchestration marks machine Failed and triggers cleanup (DeleteVM) to avoid orphaned resources.
+- Result: VM may be created successfully, then deleted.
+
+Recommended mitigations:
+- Reduce batch size / concurrency (split into smaller adds).
+- Ensure Cloud Connector and RemoteHCL are healthy and not resource constrained.
+- If lock contention is suspected: capture CPU/thread dumps and trace logs; engage engineering.
+
+Reference keywords (for searching docs / public articles):
+- "Citrix MCS machine creation pipeline"
+- "Citrix Cloud Connector provisioning callback timeout"
+- "RemoteHCL BeginMachineManagementOperation WCF"
+- "VMware CreateVM_Task callback missing"
+
+Related incident bundle:
+- Case: HELP-537
+- JobId: JOB-510F2F1B
+- Symptom: Missing async callback after CreateVM completes; cleanup deletes VMs.

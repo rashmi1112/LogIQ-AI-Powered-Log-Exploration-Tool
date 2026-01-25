@@ -1,0 +1,34 @@
+TRIAGE SUMMARY (Dev-a + Escalation)
+Case: HELP-537
+Owner: EngDev
+Date: 2026-01-24
+
+Timeline (UTC):
+16:00:00  Studio submits request to add 25 machines to catalog 'Win11-Office-VDI' (JobId=JOB-510F2F1B)
+16:00:01  Broker dispatches CreateVM operations to Cloud Connector
+16:00:03  RemoteHCL begins CreateVM operations; vCenter tasks start
+16:00:05-16:00:30  vCenter reports CreateVM task completion for all 25 machines
+16:00:23  Cloud Connector publishes success callbacks for 20 machines
+16:01:01  Cloud Connector reports lock contention and WCF channel fault (timeout after ~60s)
+16:01:03  RemoteHCL reports client disconnected; responses for 5 machines not deliverable
+16:01:10  Broker times out waiting for callbacks for 5 machines -> marks Failed
+16:01:14  Broker issues cleanup -> DeleteVM for failed machines
+16:01:18-16:01:40  vCenter Destroy_Task completes for the 5 failed machines
+
+Most likely root cause:
+Connector-side lock contention in a critical section (request tracking / callback publishing) delays WCF communication beyond the 60s window.
+The RemoteHCL session is dropped (faulted channel), which causes completion responses/callbacks to be lost for a subset of machines.
+Broker/DDC hits callback timeout and initiates cleanup, resulting in DeleteVM on vCenter even though CreateVM succeeded.
+
+Evidence mapping to logs:
+- Cloud Connector: lock contention + CommunicationObjectFaultedException (03_CloudConnector_HclProxyTrace.csv)
+- RemoteHCL: RemoteClientDisconnectedException + "response could not be returned" (04_RemoteHCL_ServiceTrace.csv)
+- Broker/DDC: WaitForCallback timeouts and cleanup requests (02_DDC_BrokerServiceTrace.csv)
+- vCenter: CreateVM task success for all 25 + Destroy_Task for 5 (05_vCenter_HypervisorTrace.csv)
+- Studio: 5 machines reported failed due to callback timeout (01_StudioConsoleTrace.csv)
+- HCL Proxy: missing per-VM provisioning result for the same 5 machines (06_HclProxy_ProvisioningGatewayTrace.csv)
+
+Action items:
+1) Engineering: reduce lock scope / remove blocking critical section in connector callback path.
+2) Engineering: add retry for transient WCF faults and persist completion for reconnect.
+3) Support: recommend smaller batches as workaround; capture additional traces if reproducing.

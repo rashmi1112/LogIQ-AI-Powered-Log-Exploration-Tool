@@ -1,0 +1,27 @@
+{
+  "case_id": "HELP-537",
+  "job_id": "JOB-510F2F1B",
+  "catalog": "Win11-Office-VDI",
+  "hypervisor": "vcenter-logs.net",
+  "failed_machines": [
+    "Win11-Office-VDI-VM07",
+    "Win11-Office-VDI-VM12",
+    "Win11-Office-VDI-VM18",
+    "Win11-Office-VDI-VM22",
+    "Win11-Office-VDI-VM24"
+  ],
+  "log_files": [
+    "studio_console.log.csv",
+    "broker_service.log.csv",
+    "cloud_connector_proxy.log.csv",
+    "remote_hcl_service.log.csv",
+    "hypervisor_callback.log.csv",
+    "provisioning_gateway.log.csv"
+  ],
+  "context_files": [
+    "context_jira_issue_summary.txt",
+    "context_customer_case_notes.txt",
+    "context_runbook_callback_timeout_vs_customization.txt",
+    "context_triage_summary.txt"
+  ]
+}

@@ -1,0 +1,90 @@
+JIRA: HELP-537
+Project: Cloud Support
+Issue Type: Customer Escalation / Incident
+Priority: P2 (Customer Impacting)
+Status: In Progress
+Component/s: Provisioning, Cloud Connector, RemoteHCL (VMware), DDC/Broker
+
+Summary:
+machine sporadically failing to be created when adding machines or creating catalog
+
+Description:
+Customer reports intermittent VM creation failures when adding machines to an existing MCS catalog (or creating a new catalog) in Citrix Cloud / CVAD.
+When adding a small batch (e.g., 5 machines) the operation succeeds. When adding a larger batch (e.g., 25 machines), a handful of machines fail.
+
+Observed symptoms:
+- Studio shows 5/25 machines as "Failed" with callback timeout / no completion reported.
+- On the hypervisor side (vCenter), all 25 VMs are created successfully.
+- Shortly after creation, 5 VMs enter a DeleteVM / Destroy_Task flow (cleanup).
+- For those 5 VMs, DDC/Broker does not receive async completion callback from Cloud Connector/HCL pipeline.
+
+Expected:
+All 25 machines should be created and reported back to Studio successfully.
+
+Actual:
+20 machines succeed; 5 machines fail in Studio due to missing async callback and then are deleted by cleanup.
+
+Affected Machines (failed in Studio):
+- Win11-Office-VDI-VM07
+- Win11-Office-VDI-VM12
+- Win11-Office-VDI-VM18
+- Win11-Office-VDI-VM22
+- Win11-Office-VDI-VM24
+
+Environment:
+- Tenant:xyz-prod
+- Customer:xyz
+- Region: US-East (Miami)
+- DDC/Broker: ddc-01.cloud.xyz.net
+- Cloud Connector: cc-logs.net (Windows Server 2022)
+- RemoteHCL: remotehcl-logs.net (VMware hypervisor plugin endpoint)
+- Hypervisor: vcenter-logs.net (vSphere 7.x)
+- Catalog: Win11-Office-VDI
+- Network: VDI-Network-Prod
+- Datastore: vsanDatastore
+- Resource Pool: XYZ
+
+Artifacts / Evidence:
+- Tracing logs (CSV) attached: Studio, DDC/Broker, Cloud Connector, HCL Proxy, RemoteHCL, vCenter.
+- Example case data path (internal): \\mia.xyz.net\casedata\10172034444\12-21
+
+Repro Steps (customer):
+1) Open Studio (Citrix Cloud) -> Machine Catalogs -> select 'Win11-Office-VDI'
+2) Add machines -> choose 25
+3) Wait for provisioning to complete
+4) Observe that ~5 machines fail and are later removed
+
+Triage Notes / Root Cause Hypothesis:
+The failure correlates with high concurrency provisioning where connector-side lock contention causes the RemoteHCL WCF client channel to fault/timeout after ~60 seconds.
+When the WCF channel faults, RemoteHCL may still complete VM creation in vCenter, but the completion response/callback is not delivered back to the Broker/DDC.
+Broker times out waiting for callbacks (60s) and marks machines failed; orchestration triggers cleanup -> DeleteVM.
+
+Related logs (high-level):
+- 03_CloudConnector_HclProxyTrace.csv: lock contention + WCF channel fault (CommunicationObjectFaultedException) around 60s.
+- 04_RemoteHCL_ServiceTrace.csv: RemoteClientDisconnectedException after VM creations; operations complete but responses cannot be returned.
+- 02_DDC_BrokerServiceTrace.csv: WaitForCallback timeout for 5 machines.
+- 05_vCenter_HypervisorTrace.csv: VM create completed for all 25; later Destroy_Task for 5.
+
+Comments / Updates:
+[2026-01-14 00:44 UTC] Chase Miakari:
+Team, we need some guidance as how to carry this case forward.
+Here is the summary of the triage between Dev-a and Escalation. Please advise how to carry this forward:
+
+[2026-01-14 03:10 UTC] Dev-a:
+We suspect connector-side timeout during high concurrency. Please capture trace logs from Cloud Connector + RemoteHCL + Broker around the failure window.
+
+[2026-01-14 05:55 UTC] Escalation:
+vCenter shows all 25 VMs created; 5 start deletion shortly after. Broker shows missing completion callback. Suspect connector/WCF fault causing lost callback.
+
+[2026-01-24 16:05 UTC] EngDev (Owner):
+Generated time-correlated trace bundle. Looking for confirmation on lock contention / connector critical section causing WCF channel fault and callback loss.
+
+Workaround (temporary):
+- Reduce concurrency / batch size (e.g., add <= 5-10 machines per operation).
+- Increase callback timeout only if supported (may mask underlying contention).
+- Retry after connector service restart.
+
+Next Steps:
+- Confirm lock contention location in connector code path (critical section protecting callback publishing / request tracking).
+- Validate with engineering whether hotfix exists (reduced lock scope / async callback decoupling).
+- If needed, add additional logging around lock wait + channel state transitions.

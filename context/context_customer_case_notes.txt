@@ -1,0 +1,42 @@
+CUSTOMER CASE NOTES (Support / Escalation)
+Case: CCVADHELP-5077
+Customer: AcmeHealth (acmehealth-prod)
+Date: 2026-01-24
+
+Customer Summary:
+Customer intermittently fails to create all machines when adding a larger batch to an MCS catalog.
+Smaller batches succeed reliably.
+
+What customer sees:
+- Studio: 5 machines report failure (creation timeout / no completion).
+- After a few minutes, the failed VMs disappear from vCenter because cleanup deletes them.
+
+What support sees:
+- vCenter audit/traces: all 25 CreateVM tasks complete successfully.
+- RemoteHCL: VM create completes but the response cannot be returned because the client session disconnects.
+- Cloud Connector: WCF channel faults around ~60s due to lock contention; callback publishing for affected operations is skipped.
+- Broker/DDC: waits 60s for async callback; times out and marks those machines as failed, then requests cleanup (DeleteVM).
+
+Impact:
+- Customer cannot scale out catalog reliably; repeated retries are slow and cause churn in vCenter.
+- Incident duration: ~15-20 minutes per attempt; operational overhead during peak usage.
+
+Reproduction pattern:
+- Adding 5 machines -> success.
+- Adding 25 machines -> intermittent; typically 3-7 machines fail.
+
+Preliminary mitigation recommended to customer:
+1) Split adds into smaller batches (<= 5-10).
+2) Stagger adds (avoid parallel bulk provisioning).
+3) Collect a full trace bundle (Connector + RemoteHCL + Broker) for any future failure.
+
+Collected trace bundle:
+- Time window: 2026-01-24 16:00:00Z - 16:02:00Z
+- JobId: JOB-510F2F1B
+- Catalog: Win11-Office-VDI
+- Failed machines: Win11-Office-VDI-VM07, Win11-Office-VDI-VM12, Win11-Office-VDI-VM18, Win11-Office-VDI-VM22, Win11-Office-VDI-VM24
+
+Open questions:
+- Is callback timeout fixed at 60s for this path? If configurable, should it be increased?
+- Can connector lock be narrowed / removed from callback path?
+- Does RemoteHCL need retry/backoff when client disconnects after CreateVM completes?
