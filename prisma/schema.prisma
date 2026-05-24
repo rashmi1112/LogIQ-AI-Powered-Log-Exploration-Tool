@@ -1,0 +1,133 @@
+// LogIQ — production schema
+// Postgres on Neon/Supabase. Cascade deletes scope user → cases → files/messages.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------- Auth (NextAuth.js v5 / Auth.js) ----------------
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+
+  accounts Account[]
+  sessions Session[]
+  cases    Case[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------------- LogIQ domain ----------------
+
+model Case {
+  id              String   @id @default(cuid())
+  userId          String
+  name            String
+  description     String?  @db.Text
+
+  // Manifest-derived metadata (optional — populated when a manifest is uploaded)
+  caseId          String?  // e.g. HELP-537
+  jobId           String?
+  catalog         String?
+  hypervisor      String?
+  failedMachines  String[] @default([])
+  manifestPayload Json?    // full raw manifest payload for reference
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  files    CaseFile[]
+  messages Message[]
+
+  @@index([userId, createdAt])
+}
+
+enum FileKind {
+  LOG       // CSV trace file
+  CONTEXT   // .txt or .json artifact
+  MANIFEST  // the investigation manifest JSON
+}
+
+model CaseFile {
+  id        String   @id @default(cuid())
+  caseId    String
+  filename  String
+  kind      FileKind
+  mimeType  String?
+  size      Int
+  blobUrl   String   // Vercel Blob public URL
+  blobPath  String   // Vercel Blob key/path (for deletion)
+  createdAt DateTime @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+}
+
+model Message {
+  id        String      @id @default(cuid())
+  caseId    String
+  role      MessageRole
+  content   String      @db.Text
+
+  // Optional structured analysis metadata
+  meta      Json?
+  createdAt DateTime    @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, createdAt])
+}
