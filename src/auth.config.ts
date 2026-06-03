@@ -8,6 +8,17 @@ import Google from "next-auth/providers/google";
  */
 export const authConfig = {
   session: { strategy: "jwt" },
+  cookies: {
+    pkceCodeVerifier: {
+      name: "authjs.pkce.code_verifier",
+      options: {
+        httpOnly: true,
+        sameSite: "lax" as const,
+        path: "/",
+        secure: true,
+      },
+    },
+  },
   providers: [
     Google({
       clientId: process.env.AUTH_GOOGLE_ID,
