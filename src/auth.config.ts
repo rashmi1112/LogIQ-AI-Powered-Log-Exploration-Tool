@@ -11,12 +11,11 @@ export const authConfig = {
   cookies: {
     pkceCodeVerifier: {
       name: "authjs.pkce.code_verifier",
-      options: {
-        httpOnly: true,
-        sameSite: "lax" as const,
-        path: "/",
-        secure: true,
-      },
+      options: { httpOnly: true, sameSite: "none" as const, path: "/", secure: true },
+    },
+    state: {
+      name: "authjs.state",
+      options: { httpOnly: true, sameSite: "none" as const, path: "/", secure: true },
     },
   },
   providers: [
