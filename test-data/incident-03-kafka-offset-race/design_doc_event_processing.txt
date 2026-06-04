@@ -1,0 +1,86 @@
+DESIGN DOCUMENT: StreamFlow Event Processing Pipeline
+======================================================
+Status: Production
+Author: Marco Delgado (Platform Engineering)
+Last Updated: 2025-04-01 (reflects Q2 scaling changes per STRM-3188)
+Version: 4.1
+
+1. OVERVIEW
+-----------
+StreamFlow processes events from Kafka topics and delivers them to downstream consumers.
+The event_processor service consumes events, routes them to domain handlers, and triggers
+state transitions via the StateMachine service.
+
+2. CONSUMER CONFIGURATION (as of 2025-04-01)
+---------------------------------------------
+  MaxPollRecords:        500  (previously 50, updated per STRM-3188)
+  Partitions:            32   (previously 16, updated per STRM-3188)
+  CommitMode:            manual (AutoCommit=false)
+  CommitInterval:        5,000ms
+  OffsetResetPolicy:     latest
+
+3. EVENT IDEMPOTENCY MODEL
+---------------------------
+Events in StreamFlow are classified into two categories:
+
+3.1 IDEMPOTENT EVENTS
+Events that can be processed multiple times without side effects. Processing duplicates
+of these events is harmless — subsequent applications produce the same state.
+Examples: ORDER_UPDATED, USER_PROFILE_UPDATED, PAYMENT_PROCESSED, INVOICE_GENERATED
+
+When a duplicate idempotent event is detected (matching EventId already in processed log),
+the event_processor logs a warning and skips processing.
+
+3.2 TERMINAL STATE EVENTS (NON-IDEMPOTENT)
+Events that drive state machines to a terminal (non-reversible) state. These events CANNOT
+be safely processed more than once. A second delivery of a terminal event to the StateMachine
+causes an IllegalStateTransitionException (the state machine cannot transition out of a
+terminal state).
+
+Examples: ORDER_CANCELLED, SUBSCRIPTION_ENDED, ACCOUNT_DEACTIVATED, CONTRACT_TERMINATED
+
+When IllegalStateTransitionException is thrown, the StateMachine service:
+  1. Logs the exception (suppressed=true in the exception meta).
+  2. Does NOT re-throw the exception (to prevent event_processor batch failure).
+  3. Does NOT update the persisted state (already terminal — no update needed).
+  4. Does NOT invalidate the entity read cache (because no state change occurred).
+
+CRITICAL NOTE: Step 4 is the correct behavior when the entity is genuinely in terminal state.
+However, if the entity's read cache was never populated with the terminal state (e.g., because
+cache invalidation from the FIRST delivery was skipped or race-conditioned), the second
+delivery's suppression of cache invalidation leaves the read cache in the pre-terminal state.
+
+The result: downstream reads continue to see the pre-terminal state (e.g., ACTIVE) indefinitely
+until the read cache TTL expires (3,600 seconds for Order state; 3,600 seconds for Subscription
+state).
+
+4. OFFSET COMMIT BEHAVIOR
+--------------------------
+Manual offset commits are used to ensure at-least-once delivery. The offset manager commits
+the highest processed offset for each partition after each poll batch.
+
+Under high parallelism (MaxPollRecords=500 with 32 partitions), two consumer threads may
+concurrently fetch overlapping ranges from the same partition if one thread is slow to commit.
+The second thread will re-process events from the last committed offset, producing duplicate
+event deliveries.
+
+For idempotent events, duplicates are harmless. For terminal state events, duplicate delivery
+triggers the behavior described in Section 3.2 — which may leave the read cache in a
+pre-terminal state if the first delivery's cache invalidation was not atomic with the commit.
+
+At MaxPollRecords=50 (previous config), overlap probability was low due to small batch windows.
+At MaxPollRecords=500, overlap windows are significantly wider, increasing duplicate frequency.
+
+5. KNOWN ISSUE (introduced by STRM-3188 scaling changes)
+----------------------------------------------------------
+The interaction between MaxPollRecords=500, manual offset commits, and non-idempotent terminal
+state event handling has not been load-tested at the new configuration scale.
+
+Specifically: under high consumer parallelism, the probability of a terminal state event being
+delivered twice increases. The second delivery causes cache invalidation to be skipped (per
+Section 3.2, Step 4), which may incorrectly leave the entity read cache in the pre-terminal
+state. This is a latent bug in the cache invalidation logic that is only exposed at higher
+duplicate event rates.
+
+Mitigation (pending STRM-3310): Terminal state events should always invalidate the read cache,
+regardless of whether the state transition was a no-op. Fix is targeted for v4.2.

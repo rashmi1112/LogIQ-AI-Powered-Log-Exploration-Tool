@@ -1,0 +1,22 @@
+{
+  "case_id": "DVSYNC-1147",
+  "job_id": "JOB-DB9F3C22",
+  "catalog": "DevSync-SaaS-Production",
+  "hypervisor": "db-cluster-eu-west-1.devsync.io",
+  "failed_machines": [
+    "db-shard-07",
+    "db-shard-08",
+    "shard-router-01"
+  ],
+  "log_files": [
+    "api_server.log.csv",
+    "shard_router.log.csv",
+    "db_proxy.log.csv"
+  ],
+  "context_files": [
+    "jira_ticket_dvsync_1098.txt",
+    "customer_case_notes.txt",
+    "runbook_data_integrity.txt",
+    "design_doc_db_sharding.txt"
+  ]
+}

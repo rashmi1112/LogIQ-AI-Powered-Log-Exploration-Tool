@@ -1,0 +1,73 @@
+CUSTOMER CASE NOTES - CRM Case #ENT-CS-7741
+===========================================
+Case Owner: Dana Pierce (Customer Success)
+Account Manager: Kevin Sloane
+Priority: P2 → escalating to P1
+
+---
+
+CUSTOMER: TechInc (ENT-0441)
+Contact: ops-team@techinc.io, m.chen@techinc.io
+Tier: Enterprise Plus
+ARR: $240,000
+
+Interaction Log:
+
+2025-03-14 09:30 UTC - Email from ops-team@techinc.io:
+  "We're seeing build failures on our atlas-backend project for the past couple of days.
+  Builds just hang and eventually fail. We retried and it sometimes works. Our CI pipeline
+  is partially broken right now. Please advise."
+
+2025-03-14 10:15 UTC - Follow-up email from m.chen@techinc.io:
+  "Same issue happening on my feature branch too. I noticed it seems to happen specifically
+  when Marcus and I both push and trigger builds at the same time. When I build alone it
+  seems to work fine, or at least more reliably. Our repo is large - about 2.8GB workspace
+  when checked out. Is that relevant?"
+
+2025-03-14 11:00 UTC - Phone call with ops-team@techinc.io (Dana Pierce notes):
+  Customer described: builds hang during workspace preparation. They have a monorepo with
+  multiple teams pushing frequently. They specifically noted the failures seem correlated
+  with periods of higher team activity (multi-developer concurrent pushes). Atlas-backend
+  workspace is approximately 2.8GB.
+
+2025-03-14 14:45 UTC - Email from ops-team@techinc.io:
+  "We've had 5 failures now. We retried 3 of them and 2 eventually worked. This is
+  blocking our release pipeline. We're evaluating whether Buildify meets our SLAs."
+
+---
+
+CUSTOMER: CloudCore Solutions (ENT-0388)
+Contact: devops@cloudcore.io
+Tier: Enterprise
+ARR: $96,000
+
+Interaction Log:
+
+2025-03-14 11:30 UTC - Support ticket from devops@cloudcore.io:
+  "Builds on core-platform have been randomly timing out since early this week. We're in a
+  sprint crunch and this is very disruptive. The failures happen maybe 1 in 3 builds."
+
+2025-03-14 13:00 UTC - Follow-up from devops@cloudcore.io:
+  "Our repo is a large monorepo - 3.1GB workspace checkout. Not sure if that's relevant but
+  our smaller microservices repos don't seem to have this issue at all."
+
+---
+
+CUSTOMER: NexaBuild Ltd (ENT-0512)
+Contact: build-team@nexabuild.io
+Tier: Enterprise
+ARR: $72,000
+
+Interaction Log:
+
+2025-03-14 12:45 UTC - Support ticket from build-team@nexabuild.io:
+  "One of our devs hit a build timeout on nexabuild-monorepo today during our daily standup
+  build. We kicked it off again manually and it worked. Single occurrence so far. Repo
+  checkout is about 2.9GB. Flagging just in case it's a broader issue."
+
+---
+
+INTERNAL NOTES (Dana Pierce):
+Pattern observed: All three affected customers have large workspaces (2.8GB, 3.1GB, 2.9GB).
+No failures reported on smaller repos. TechInc specifically mentioned concurrent builds being
+a factor. Escalating to engineering with Jira BLDFY-2891.

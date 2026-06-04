@@ -1,0 +1,65 @@
+CUSTOMER CASE NOTES - CRM Case #DVSYNC-CS-4419
+===============================================
+Case Owner: Priya Mehta (Customer Success)
+Priority: P2
+
+---
+
+CUSTOMER: Orbital Software (ORB-0221)
+Contact: dev-platform@orbital.io
+Tier: Business
+ARR: $48,000
+
+Interaction Log:
+
+2025-02-07 08:15 UTC - Support ticket from dev-platform@orbital.io:
+  "We noticed some of our project tasks are missing this morning. Our team was working late
+  last night and made several updates around midnight. When they checked this morning, some
+  of the changes are gone. We've verified that the API returned 200 OK on all the writes.
+  The missing data is for user accounts in our USR-8800 to USR-8900 range."
+
+2025-02-07 09:00 UTC - Phone follow-up (Priya Mehta notes):
+  Customer confirmed that data loss is limited to changes made between approximately
+  03:00 AM and 03:05 AM UTC on 2025-02-07. Earlier and later changes are unaffected.
+  They are certain the writes succeeded (200 OK responses, no errors in their client logs).
+
+---
+
+CUSTOMER: StackLayer Inc (SLI-0419)
+Contact: engineering@stacklayer.io
+Tier: Business
+ARR: $36,000
+
+Interaction Log:
+
+2025-02-07 09:30 UTC - Support ticket from engineering@stacklayer.io:
+  "Several project settings configurations that we updated at around 3am UTC are showing
+  the old values. We update these settings nightly via our automation scripts, and tonight's
+  run appears to have partially failed - but our script logs show 200 OK for every API call.
+  Affected users: USR-8901, USR-9002. Other users are fine."
+
+2025-02-07 10:15 UTC - Follow-up from engineering@stacklayer.io:
+  "We re-ran the affected updates and the data is now saving correctly. The problem seems
+  to have been transient - only that specific 3 AM window. Very odd."
+
+---
+
+CUSTOMER: GridForge Technologies (GFT-0088)
+Contact: ops@gridforge.io
+Tier: Startup
+ARR: $14,400
+
+Interaction Log:
+
+2025-02-07 11:00 UTC - Support ticket from ops@gridforge.io:
+  "Our sprint board data from last night's update is stale. One of our engineers was updating
+  sprint assignments around 3 AM UTC. The API said success but the data on the dashboard
+  still shows old assignments. Refreshing doesn't help. This is for project USR-8832."
+
+---
+
+INTERNAL NOTES (Priya Mehta):
+All three customers report data loss/staleness for writes made between 03:00 and 03:05 UTC.
+All affected user IDs fall in the USR-8800 to USR-9050 range. Writes before 03:00 and after
+03:05 appear unaffected. API returned 200 OK in all cases. Escalating to DB Platform team.
+Opening DVSYNC-1147.

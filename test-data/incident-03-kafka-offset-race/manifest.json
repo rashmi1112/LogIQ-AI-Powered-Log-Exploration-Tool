@@ -1,0 +1,22 @@
+{
+  "case_id": "STRM-3302",
+  "job_id": "JOB-KF7E1A44",
+  "catalog": "StreamFlow-SaaS-Production",
+  "hypervisor": "kafka-cluster-us-west-2.streamflow.io",
+  "failed_machines": [
+    "kafka-consumer-03",
+    "kafka-consumer-07",
+    "event-processor-02"
+  ],
+  "log_files": [
+    "kafka_consumer.log.csv",
+    "event_processor.log.csv",
+    "state_machine.log.csv"
+  ],
+  "context_files": [
+    "jira_ticket_strm_3188.txt",
+    "customer_case_notes.txt",
+    "runbook_event_pipeline.txt",
+    "design_doc_event_processing.txt"
+  ]
+}

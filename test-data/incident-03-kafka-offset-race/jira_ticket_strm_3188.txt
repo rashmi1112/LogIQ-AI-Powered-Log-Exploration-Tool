@@ -1,0 +1,52 @@
+JIRA TICKET: STRM-3188
+=======================
+Title: Scale Kafka consumer throughput for Q2 traffic growth
+Priority: P3 - Medium
+Status: DONE
+Assignee: Platform Engineering - Marco Delgado
+Reporter: Infrastructure - Yuna Park
+Created: 2025-03-18
+Closed: 2025-04-01
+Labels: kafka, performance, scaling, config-change
+
+DESCRIPTION
+-----------
+Traffic analysis shows our Kafka consumer lag has been growing over the past 6 weeks,
+particularly for the streamflow-events-cg consumer group. At peak hours the lag is reaching
+40,000+ messages, causing downstream processing delays of up to 8 minutes.
+
+Proposed changes:
+  1. Double the Kafka topic partition count from 16 to 32 (enables more parallelism)
+  2. Increase MaxPollRecords from 50 to 500 (reduce poll overhead per consumer thread)
+
+These changes together should increase consumer throughput by approximately 8-10x.
+
+IMPLEMENTATION NOTES
+--------------------
+2025-03-20 - Marco Delgado:
+Partition doubling completed in staging. Consumer rebalancing completed cleanly. No
+events dropped during rebalance. Lag cleared within 4 minutes of applying changes.
+
+2025-04-01 - Marco Delgado:
+Deployed to production during maintenance window (02:00-03:00 UTC).
+  - Partition count: 16 → 32 (applied)
+  - MaxPollRecords: 50 → 500 (applied via consumer group config update)
+  - Consumer group rebalance completed successfully
+  - Lag metric improved from 40,000 to < 5,000 within 10 minutes
+
+Closing ticket as successfully deployed.
+
+TESTING NOTES
+-------------
+Staging load test ran for 2 hours at 2x normal peak. No issues observed.
+Note: Staging test did not include concurrent consumer thread scenarios with partition
+rebalances under high MaxPollRecords. Test data used idempotent event types only.
+
+RISK NOTES
+----------
+Low risk. Partition increase is additive. MaxPollRecords increase improves throughput.
+No consumer application code changes required.
+
+LINKED TICKETS
+--------------
+STRM-3302 - Customers reporting cancelled orders showing as active (opened 2025-04-02)

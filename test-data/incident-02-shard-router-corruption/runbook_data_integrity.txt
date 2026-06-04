@@ -1,0 +1,56 @@
+RUNBOOK: Data Integrity Investigation - Missing or Stale Write Data
+====================================================================
+Version: 1.4
+Last Updated: 2024-11-01
+Owner: Database Platform
+
+SCOPE
+-----
+This runbook covers scenarios where customer writes return HTTP 200 but data is subsequently
+missing or stale on read. This is distinct from write errors (4xx/5xx) which are covered by
+the API Error runbook.
+
+STEP 1: CHARACTERIZE THE INCIDENT
+-----------------------------------
+Gather from the customer report:
+- Affected user IDs or account ranges
+- Time window of affected writes (start and end time, UTC)
+- Whether the issue is self-healing (data eventually appears) or permanent
+- Whether all writes in the window are affected or only specific resource types
+
+STEP 2: CHECK API SERVER LOGS
+------------------------------
+- Review api_server.log.csv for the affected time window.
+- Look for: Status=200 on PUT/POST alongside subsequent GET requests returning empty/stale data.
+- If the pattern shows write success followed by stale reads, proceed to Step 3.
+
+STEP 3: CHECK DATABASE PROXY LOGS
+-----------------------------------
+- Review db_proxy.log.csv for the affected time window.
+- Verify: which shard received the write, and which shard served the subsequent read.
+- If write shard ≠ read shard for the same key, a routing inconsistency is present.
+- Escalate to Database Platform with the shard mismatch details.
+
+STEP 4: CHECK REPLICATION LAG
+-------------------------------
+- Connect to the affected shard primary: SELECT * FROM pg_stat_replication;
+- Check replication lag. If lag > 30s, this may explain stale reads from replicas.
+- Acceptable lag threshold: < 5s. If exceeded, alert on-call DBA.
+
+STEP 5: CHECK FOR RECENT SCHEMA MIGRATIONS
+--------------------------------------------
+- Review deployment history for any migrations run in the affected time window.
+- If a migration touched the affected tables, verify it completed cleanly.
+- Check for long-running transactions that may have held row locks.
+
+STEP 6: ESCALATION
+-------------------
+If Steps 1-5 do not identify the root cause, escalate to Database Platform lead with:
+- Affected user ID range
+- Write/read shard discrepancy from Step 3 (if found)
+- Time window
+- Customer case reference
+
+NOTE: This runbook does not cover shard routing configuration issues. If a shard routing
+anomaly is suspected, contact the Shard Router team directly. Shard router config parameters
+are managed separately and are not included in this runbook's scope.

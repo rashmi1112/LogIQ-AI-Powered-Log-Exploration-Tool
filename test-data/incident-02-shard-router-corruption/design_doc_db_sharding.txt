@@ -1,0 +1,74 @@
+DESIGN DOCUMENT: DevSync Database Sharding Architecture
+=========================================================
+Status: Production
+Author: Arjun Kapoor (Database Platform)
+Last Updated: 2025-01-24 (reflects TTL change per DVSYNC-1098)
+Version: 3.2
+
+1. OVERVIEW
+-----------
+DevSync uses horizontal database sharding to distribute user data across 16 PostgreSQL
+shards. Shard assignment is deterministic based on UserId: SHA256(UserId) % 16.
+
+2. SHARD ROUTER
+---------------
+The ShardRouter service maintains an in-memory cache of the current shard map. All write
+and read requests pass through the ShardRouter, which resolves the target shard.
+
+Key configuration parameters:
+  CacheTTLMs:        300,000 (5 minutes) — time before shard map is refreshed from config store
+  ShardCount:        16
+  ReadConsistency:   eventual (reads may go to primary or replica)
+  WriteConsistency:  strong (writes always go to primary)
+
+Note: CacheTTLMs was increased from 60,000 to 300,000 on 2025-01-24 (DVSYNC-1098) to
+reduce latency overhead from frequent cache refreshes.
+
+3. READ VS WRITE ROUTING
+------------------------
+Writes: Router resolves shard using the current in-memory shard map cache.
+Reads: Router resolves shard using the current in-memory shard map cache.
+
+Both reads and writes use the same cache. Cache is refreshed lazily after TTL expiry.
+
+IMPORTANT: The shard map cache is updated from the config store after TTL expiry. There is
+no push-based invalidation. If the shard map changes (e.g., after a rebalance), the router
+will continue using the old map until TTL expires.
+
+4. SHARD REBALANCING
+--------------------
+Shard rebalances are triggered by the Shard Coordinator service. Rebalances are scheduled
+during the low-traffic window: 03:00 UTC daily. A typical rebalance takes 90-180 seconds
+to migrate data between shards.
+
+After a rebalance completes, the Shard Coordinator publishes a new shard map (e.g., v14→v15)
+to the config store. The ShardRouter will pick up the new map on its next TTL refresh.
+
+Rebalance frequency: At most once per day. Triggered only when shard imbalance exceeds 15%.
+
+5. CONSISTENCY DURING REBALANCE
+--------------------------------
+The rebalance process migrates data from one shard to another. During the migration window,
+the old shard serves as primary for the migrating range. Once migration completes, the
+Shard Coordinator updates the config store with the new routing.
+
+Gap window: From the moment the rebalance completes and the new map is published, until the
+ShardRouter refreshes its cache (up to CacheTTLMs = 300s), the router may send writes to
+the old shard for migrated key ranges. Reads from the new shard will not see these writes.
+
+This gap is the window of potential write misdirection. With CacheTTLMs=300,000ms and a
+rebalance completing at 03:02 UTC, the gap window is 03:02 to 03:07 UTC (approximately).
+
+Note: This was previously a 60-second gap (with CacheTTLMs=60,000). The TTL increase to
+300,000 extended this gap to up to 5 minutes. See Section 6 for failure mode analysis.
+
+6. FAILURE MODES
+----------------
+6.1 Replica lag causing stale reads: covered by replication monitoring.
+6.2 Shard primary failover: router detects unhealthy primary and reroutes within 10s.
+6.3 Config store unavailability: router continues with cached map; alert fires after 60s.
+6.4 Write misdirection during rebalance gap: NOT currently alerting. Writes to old shard
+    during the gap window are acknowledged (200 OK) but reads from new shard will not see
+    them. Duration of gap = CacheTTLMs minus elapsed time since last refresh at rebalance.
+    This failure mode was acceptable with a 60s TTL but has not been re-evaluated since
+    TTL was increased to 300s.

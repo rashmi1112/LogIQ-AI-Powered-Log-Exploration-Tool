@@ -1,0 +1,84 @@
+DESIGN DOCUMENT: Smart Cache v2 - Workspace Caching for Large Repositories
+===========================================================================
+Status: Implemented - Deployed 2025-03-10
+Author: Priya Natarajan (Cache Platform)
+Reviewers: Ryan Marsh, Tom Okafor
+Version: 1.0
+
+1. OVERVIEW
+-----------
+Smart Cache v2 introduces persistent workspace caching for repositories larger than 500MB.
+In v1, workspaces were always fully cloned from source control. For large repos (2GB+), this
+resulted in clone times of 45-90 seconds per build, significantly impacting throughput on
+enterprise accounts. v2 caches workspace snapshots and applies delta updates on subsequent builds.
+
+2. ARCHITECTURE
+---------------
+CacheManager is a dedicated service running on each build cluster node. It maintains:
+  - blob-store: raw workspace file chunks
+  - delta-index: per-file diff metadata
+  - snapshot-registry: mapping of commit hashes to snapshot IDs
+
+When a build requests a workspace, BuildExecutor sends a cache lookup to CacheManager. On
+a cache hit, CacheManager returns the snapshot for delta application. On a miss or an
+invalidation request, CacheManager evicts the stale snapshot and prepares for a fresh one.
+
+3. LOCK MECHANISM
+-----------------
+Cache invalidation uses pessimistic locking at the cache-key level. This ensures that two
+builds cannot simultaneously modify the same workspace snapshot, which could corrupt the
+snapshot-registry.
+
+Lock acquisition timeout: 30,000ms (configurable via CACHE_LOCK_TIMEOUT_MS).
+Lock holder: whichever thread first acquires the lock for a given key.
+Lock retry: NONE. If the lock cannot be acquired within the timeout, an error is returned
+to the caller. BuildExecutor interprets this error as a CacheInvalidationTimeout.
+
+Lock scope: Locks are held at the workspace cache key level. However, for workspaces exceeding
+2GB, the lock is internally promoted to the underlying storage shard lock to prevent partial
+eviction race conditions during large chunk eviction (see Section 3.2 for shard mapping).
+
+3.1 SHARD LOCK PROMOTION
+------------------------
+Workspaces exceeding 2GB are stored across multiple cache shards. Invalidation of a large
+workspace acquires a shard-level lock, which blocks ALL other operations on that shard until
+invalidation is complete. For a 2.8GB workspace, full invalidation (all 3 layers) takes
+approximately 24,000-32,000ms under normal I/O conditions.
+
+3.2 SHARD MAPPING
+-----------------
+Cache key to shard mapping: SHA256(cache_key) % NUM_SHARDS (default: 16).
+Keys sharing the same shard will contend for the shard lock when concurrent invalidations occur.
+
+4. KNOWN LIMITATIONS
+--------------------
+4.1 Single-key concurrency: Concurrent invalidation of the same cache key is not supported.
+    Two BuildExecutor threads requesting invalidation of the same key will result in one
+    acquiring the shard lock and the other waiting for up to CACHE_LOCK_TIMEOUT_MS. If the
+    invalidation of a large workspace exceeds this timeout (which is possible for workspaces
+    near 2GB), the waiting caller will receive a LockTimeout error.
+
+4.2 Concurrent same-shard invalidation: Two different cache keys that hash to the same shard
+    will also contend for the shard lock. For workspaces > 2GB, this is particularly risky as
+    the shard lock is held for the full invalidation duration of 24,000-32,000ms.
+
+    STATUS: Fix targeted for v2.1 (Q2 2025). Workaround: avoid triggering concurrent builds
+    for large workspaces on the same project. See BLDFY-2922 for tracking.
+
+4.3 No automatic retry on LockTimeout: BuildExecutor does not retry the invalidation request
+    after a LockTimeout. This is intentional to prevent thundering herd on the CacheManager,
+    but means the build will fail rather than queue behind the lock holder.
+
+5. DEPLOYMENT NOTES
+--------------------
+- Smart Cache v2 is enabled by default for workspaces > 500MB on enterprise runner queues.
+- CacheVersion=v2 is stamped on all build log entries to aid in correlation.
+- Rollback procedure: set SMART_CACHE_VERSION=v1 in runner environment config and restart
+  BuildExecutor. This will revert to full-clone mode.
+
+6. METRICS AND ALERTING
+-----------------------
+- cache_manager.lock_timeout_total: Counter of lock timeout events. Alert threshold: > 5/hour.
+- cache_manager.invalidation_duration_p99: Histogram. Alert threshold: > 35s.
+- NOTE: Alert thresholds were set for expected single-tenant usage. Multi-tenant concurrent
+  large workspace scenarios were not included in load testing for v2.0.

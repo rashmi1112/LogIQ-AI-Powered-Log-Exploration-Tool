@@ -1,0 +1,44 @@
+JIRA TICKET: DVSYNC-1098
+========================
+Title: DB performance: increase shard router cache TTL for improved read throughput
+Priority: P3 - Medium
+Status: DONE
+Assignee: Database Platform - Arjun Kapoor
+Reporter: Performance Engineering - Lisa Wei
+Created: 2025-01-20
+Closed: 2025-01-24
+Labels: database, performance, config-change
+
+DESCRIPTION
+-----------
+The shard router currently refreshes its shard map cache every 60 seconds. Profiling shows
+that the shard map refresh is causing ~2-3ms of additional latency per request during the
+refresh cycle, as the router briefly blocks on config reload. Under peak load (12,000 req/s)
+this contributes to P99 latency spikes of 8-12ms.
+
+Proposal: Increase CacheTTLMs from 60,000 to 300,000 (5 minutes). Shard rebalances happen
+at most once per day (scheduled at 03:00 UTC, low-traffic window) so a 5-minute stale window
+around the rebalance is acceptable per our SLA.
+
+IMPLEMENTATION NOTES
+--------------------
+2025-01-22 - Arjun Kapoor:
+Updated ShardRouter config:
+  - CacheTTLMs: 60000 → 300000
+
+Deployed to staging 2025-01-22. Load test showed P99 latency improved by 9ms.
+
+2025-01-24 - Arjun Kapoor:
+Deployed to production. Monitoring shows expected improvement. Closing ticket.
+
+RISK ASSESSMENT
+---------------
+Low risk. Shard rebalances are infrequent and happen during low-traffic windows.
+The 5-minute stale window aligns with our eventual consistency SLA of 10 minutes.
+
+NOTE: This change was not cross-checked against the rebalance coordinator behavior.
+Assumption made that rebalance window is short enough to fall within stale window tolerance.
+
+LINKED TICKETS
+--------------
+DVSYNC-1147 - Production data inconsistency reports (opened 2025-02-07) ← NEW

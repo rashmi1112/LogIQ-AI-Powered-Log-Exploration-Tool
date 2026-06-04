@@ -1,0 +1,24 @@
+{
+  "case_id": "BLDFY-2891",
+  "job_id": "JOB-CC4F2A09",
+  "catalog": "Buildify-SaaS-Enterprise",
+  "hypervisor": "build-cluster-us-east-1.buildify.io",
+  "failed_machines": [
+    "build-runner-07",
+    "build-runner-12",
+    "build-runner-19",
+    "build-runner-23"
+  ],
+  "log_files": [
+    "build_executor.log.csv",
+    "cache_manager.log.csv",
+    "artifact_store.log.csv",
+    "api_gateway.log.csv"
+  ],
+  "context_files": [
+    "jira_ticket_bldfy_2891.txt",
+    "customer_case_notes.txt",
+    "runbook_build_failures.txt",
+    "design_doc_smart_cache_v2.txt"
+  ]
+}

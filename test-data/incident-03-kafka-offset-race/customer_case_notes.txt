@@ -1,0 +1,71 @@
+CUSTOMER CASE NOTES - CRM Case #STRM-CS-8819
+=============================================
+Case Owner: Fabian Torres (Customer Success)
+Priority: P2
+
+---
+
+CUSTOMER: Meridian Commerce (MER-0331)
+Contact: platform-ops@meridian.io
+Tier: Enterprise
+ARR: $180,000
+
+Interaction Log:
+
+2025-04-02 14:00 UTC - Support ticket from platform-ops@meridian.io:
+  "We have several orders that customers cancelled via our platform but are still showing
+  as 'Active' in our order management dashboard. The cancellations appear to have gone
+  through (customers received confirmation emails), but the order status in the API is
+  still showing ACTIVE. This is causing our support team to handle customer complaints
+  and is also affecting our billing logic. Affected orders include ORD-441801 and several
+  others from this morning."
+
+2025-04-02 14:45 UTC - Follow-up from platform-ops@meridian.io:
+  "We are seeing the same issue with subscription cancellations. SUB-90011 was cancelled
+  this morning but our system still shows it as ACTIVE. We're incorrectly charging the
+  customer for a subscription they cancelled. This is urgent."
+
+2025-04-02 15:30 UTC - Phone call (Fabian Torres notes):
+  The customer confirmed the issues started this morning (2025-04-02) after their system
+  was using StreamFlow's event pipeline for state updates since about 11:00 UTC. They
+  noted that most events (order updates, profile changes) seem to be processing fine.
+  Only terminal state events (cancellations, subscription endings) seem affected.
+
+---
+
+CUSTOMER: Vantage Retail (VAN-0519)
+Contact: engineering@vantageretail.io
+Tier: Business
+ARR: $72,000
+
+Interaction Log:
+
+2025-04-02 15:00 UTC - Support ticket from engineering@vantageretail.io:
+  "Multiple subscription cancellations processed since this morning are not reflecting in
+  our downstream systems. We get the events from StreamFlow, but the state in our DB still
+  shows ACTIVE for affected subscriptions. We rely on these state changes for access control
+  - some cancelled users still have access to premium features."
+
+---
+
+CUSTOMER: NordPay Systems (NRD-0714)
+Contact: tech-support@nordpay.io
+Tier: Business
+ARR: $48,000
+
+Interaction Log:
+
+2025-04-02 16:00 UTC - Support ticket from tech-support@nordpay.io:
+  "Order state transitions are inconsistent. Specifically cancellations. Our order service
+  subscribes to StreamFlow events and updates order states accordingly. Cancelled orders
+  from today are still showing active in our portal. Standard event types (updates, payments)
+  seem fine - only cancellations and terminations are broken."
+
+---
+
+INTERNAL NOTES (Fabian Torres):
+Pattern: All three customers report the same symptom - terminal state events (ORDER_CANCELLED,
+SUBSCRIPTION_ENDED) not being reflected in downstream state, while non-terminal events
+(ORDER_UPDATED, PAYMENT_PROCESSED, USER_PROFILE_UPDATED) are working correctly.
+Issue started 2025-04-02 around 11:00 UTC for all customers.
+Escalating to Platform Engineering as STRM-3302.

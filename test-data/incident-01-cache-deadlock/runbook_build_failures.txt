@@ -1,0 +1,67 @@
+RUNBOOK: Build Failure Triage - Workspace Preparation Timeouts
+==============================================================
+Version: 2.1
+Last Updated: 2025-01-15
+Owner: Platform Engineering
+
+SCOPE
+-----
+This runbook covers investigation and remediation of build failures that occur during the
+workspace preparation phase, before any build steps have executed.
+
+STEP 1: IDENTIFY AFFECTED BUILDS
+---------------------------------
+- Query build_executor logs for ERROR level events with "Reason=CacheInvalidationTimeout"
+  or "BuildTimeout" in the past 24 hours.
+- Identify the JobIds, project names, and runner assignments.
+- Check if failures are isolated to a single runner or spread across multiple.
+
+STEP 2: CHECK RUNNER HEALTH
+-----------------------------
+- SSH to affected runners and run: top, df -h, iostat -x 1 5
+- Thresholds that indicate resource pressure:
+    CPU sustained > 80% for > 5 min
+    Memory free < 10%
+    Disk I/O await > 50ms
+- If any threshold is breached, trigger auto-scaling for the queue and notify
+  Platform Engineering Slack channel #build-infra-alerts.
+
+STEP 3: CHECK NETWORK CONNECTIVITY
+------------------------------------
+- From runner, ping artifact-store.buildify.io and build-cache.buildify.io
+- Run: traceroute build-cache.buildify.io
+- Acceptable latency: < 20ms P99 within the same region.
+- If packet loss > 1% or latency > 50ms, escalate to Network Operations.
+
+STEP 4: CHECK ARTIFACT STORE AVAILABILITY
+------------------------------------------
+- Confirm artifact_store.log.csv shows no ERROR-level entries in the affected window.
+- Check artifact store health endpoint: GET /healthz
+- If unhealthy, escalate to Storage Engineering team.
+
+STEP 5: CHECK BUILD CONFIGURATION
+-----------------------------------
+- Review the build YAML for the affected project for any known problematic patterns:
+    Large file copies in pre-build hooks
+    Custom cache configuration overrides
+    External dependency fetches with no timeout
+- If a misconfiguration is suspected, work with the customer to correct it.
+
+STEP 6: ESCALATION
+-------------------
+If steps 1-5 do not identify the cause, escalate to Platform Engineering lead with:
+- Affected JobIds
+- Runner IDs
+- Timestamp range
+- Customer account details
+- Any anomalous log lines from build_executor.log.csv
+
+KNOWN ISSUES
+------------
+- Build runners in the enterprise-large queue may occasionally be over-provisioned during
+  peak hours (09:00-11:00 UTC). Consider queue rebalancing if more than 3 failures in an hour.
+- Workspace sync for repos > 5GB may take up to 60 seconds before the build phase begins.
+  This is expected behavior and not a failure state.
+
+NOTE: This runbook covers workspace preparation failures related to runner resources, network,
+and artifact store. Cache subsystem issues should be directed to the Cache Platform team.

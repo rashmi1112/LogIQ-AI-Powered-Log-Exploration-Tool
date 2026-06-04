@@ -1,0 +1,59 @@
+JIRA TICKET: BLDFY-2891
+=======================
+Title: Intermittent build timeouts on enterprise-tier projects
+Priority: P2 - High
+Status: In Investigation
+Assignee: Platform Engineering - Ryan Marsh
+Reporter: Customer Success - Dana Pierce
+Created: 2025-03-14 10:30 UTC
+Updated: 2025-03-14 14:55 UTC
+Labels: build-infrastructure, regression, enterprise-tier
+
+DESCRIPTION
+-----------
+Multiple enterprise customers are reporting intermittent build failures. Builds are starting
+normally but then hanging indefinitely during the workspace preparation phase before eventually
+timing out. Retrying the build sometimes works, but not always.
+
+Affected customers (as of initial report):
+- TechInc (account ID: ENT-0441) - 3 failures reported on atlas-backend project
+- CloudCore Solutions (account ID: ENT-0388) - 2 failures reported on core-platform project
+- NexaBuild Ltd (account ID: ENT-0512) - 1 failure reported on nexabuild-monorepo project
+
+All failures observed with jobs in the enterprise-large runner queue.
+
+INVESTIGATION NOTES
+-------------------
+2025-03-14 11:00 UTC - Ryan Marsh:
+Checked build runner health metrics. CPU utilization normal (avg 34%), memory headroom fine (72%
+available), disk I/O within normal range. No obvious resource contention on runner nodes.
+
+2025-03-14 12:30 UTC - Ryan Marsh:
+Looked at network latency between runners and artifact store. P99 latency = 18ms, within SLA.
+No packet loss detected. Not a network issue.
+
+2025-03-14 13:45 UTC - Ryan Marsh:
+Reviewed runner logs for JOB-CC4F2A09 and JOB-CC4F2A10. Both failed during workspace prep phase
+with "CacheInvalidationTimeout". Failures started occurring 4 days after the Smart Cache v2
+deployment on 2025-03-10. Might be related to that rollout - opening a linked ticket BLDFY-2888
+(smart-cache-v2 deployment changes).
+
+2025-03-14 14:55 UTC - Dana Pierce:
+Escalating to P1 pending confirmation. TechInc has now reported 5 total failures and is
+threatening to downgrade their enterprise contract. Customer notes in CRM case #ENT-CS-7741.
+
+LINKED TICKETS
+--------------
+BLDFY-2888 - Smart Cache v2 deployment - Merged 2025-03-10
+BLDFY-2850 - Enterprise runner queue capacity - Closed 2025-02-28
+
+WORKAROUND
+----------
+Retry the failing build. Success rate on retry is approximately 60-70% depending on current
+concurrent build load.
+
+DEPLOYMENT CONTEXT
+------------------
+Smart Cache v2 was deployed on 2025-03-10 to all enterprise runners as part of the Q1
+performance initiative. The feature enables large workspace caching to reduce clone times for
+repos > 500MB. No issues were reported in the first 4 days post-deployment.
