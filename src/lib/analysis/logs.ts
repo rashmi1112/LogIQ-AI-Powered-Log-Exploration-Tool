@@ -5,11 +5,11 @@
 import { parse } from "csv-parse/sync";
 
 export const DEFAULTS = {
-  MAX_ROWS: 1200,
-  ERROR_ROWS: 450,
-  STACK_ROWS: 250,
-  RECENT_ROWS: 350,
-  KW_ROWS: 250,
+  MAX_ROWS: 800,
+  ERROR_ROWS: 300,
+  STACK_ROWS: 175,
+  RECENT_ROWS: 225,
+  KW_ROWS: 175,
   CONTEXT_CHARS: 14000,
 };
 

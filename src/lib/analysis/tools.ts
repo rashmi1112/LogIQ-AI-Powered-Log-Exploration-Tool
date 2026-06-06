@@ -26,7 +26,7 @@ export const SearchLogsInput = z.object({
 });
 export type SearchLogsInput = z.infer<typeof SearchLogsInput>;
 
-const SEARCH_DEFAULT_LIMIT = 50;
+const SEARCH_DEFAULT_LIMIT = 25;
 const SEARCH_MAX_LIMIT = 200;
 
 export interface SearchLogsResult {

@@ -21,7 +21,7 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_TURNS = 8;
+const MAX_TURNS = 10;
 const REPORT_QUESTION =
   "Generate a comprehensive investigation report for this incident. " +
   "Analyse all available evidence across every uploaded file, build a complete timeline, " +
@@ -72,15 +72,30 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
           });
 
           const anthropic = getAnthropic();
-          const messages: Anthropic.MessageParam[] = [{ role: "user", content: userPrompt }];
+          // cache_control on the user prompt caches the large log blob so agentic-loop
+          // turns 2-N read it from cache instead of re-processing it.
+          // SDK 0.32.x doesn't include cache_control in TextBlockParam types; the cast
+          // bridges the gap while preserving the property in the JSON sent to the API.
+          const messages: Anthropic.MessageParam[] = [
+            { role: "user", content: [{ type: "text" as const, text: userPrompt, cache_control: { type: "ephemeral" as const } }] as unknown as Array<Anthropic.TextBlockParam> },
+          ];
+
+          // A report run always needs a structured submit_analysis. forceSubmit makes
+          // the model deliver it via tool_choice when it stalls or runs out of turns,
+          // so the report can never end as bare "let me compile the findings" text.
+          let forceSubmit = false;
+          let nudgedToSubmit = false;
 
           for (let turn = 0; turn < MAX_TURNS; turn++) {
+            if (turn === MAX_TURNS - 1 && !analysis) forceSubmit = true;
+
             const messageStream = anthropic.messages.stream({
               model: ANTHROPIC_MODEL,
               max_tokens: ANTHROPIC_DEFAULTS.maxTokens,
               temperature: ANTHROPIC_DEFAULTS.temperature,
-              system: SYSTEM_PROMPT,
+              system: [{ type: "text" as const, text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" as const } }] as unknown as Anthropic.TextBlockParam[],
               tools: ANALYSIS_TOOLS,
+              tool_choice: forceSubmit ? { type: "tool", name: "submit_analysis" } : undefined,
               messages,
             });
 
@@ -93,7 +108,20 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
 
             const final = await messageStream.finalMessage();
             messages.push({ role: "assistant", content: final.content });
-            if (final.stop_reason !== "tool_use") break;
+            if (final.stop_reason !== "tool_use") {
+              // Model ended with text but no report — nudge once and force the tool.
+              if (!analysis && !nudgedToSubmit) {
+                nudgedToSubmit = true;
+                forceSubmit = true;
+                messages.push({
+                  role: "user",
+                  content:
+                    "Finish now: call submit_analysis exactly once with your complete structured findings. Do not reply with plain text.",
+                });
+                continue;
+              }
+              break;
+            }
 
             const toolResults: Anthropic.ToolResultBlockParam[] = [];
             for (const block of final.content) {
@@ -107,7 +135,10 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
                 send("tool", { name: "search_logs", input: parsed.data });
                 toolEvents.push({ name: "search_logs", input: parsed.data });
                 const result = runSearchLogs(assembled.allRows, parsed.data);
-                toolResults.push({ type: "tool_result", tool_use_id: block.id, content: result.text });
+                const historyContent = result.text.length > 3000
+                  ? result.text.slice(0, 3000) + "\n[truncated — raise limit or narrow query to see more]"
+                  : result.text;
+                toolResults.push({ type: "tool_result", tool_use_id: block.id, content: historyContent });
               } else if (block.name === "submit_analysis") {
                 const parsed = SubmitAnalysisInput.safeParse(block.input);
                 if (!parsed.success) {

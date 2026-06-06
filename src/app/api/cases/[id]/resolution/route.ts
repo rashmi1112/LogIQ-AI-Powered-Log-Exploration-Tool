@@ -3,7 +3,7 @@ import { z } from "zod";
 import { MessageRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { ApiError, handleApiError, requireCaseOwnership, requireUser } from "@/lib/api";
-import { ANTHROPIC_DEFAULTS, ANTHROPIC_MODEL, getAnthropic } from "@/lib/claude";
+import { ANTHROPIC_MODEL, getAnthropic } from "@/lib/claude";
 import { RESOLUTION_SYSTEM_PROMPT } from "@/lib/analysis/pipeline";
 import type { SubmitAnalysisInput } from "@/lib/analysis/tools";
 
@@ -50,11 +50,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       ? (reportMessage.meta as Record<string, unknown> | null)?.analysis as SubmitAnalysisInput | undefined
       : undefined;
 
-    // Build the synthesis prompt
-    const conversationText = chatMessages
+    // Build the synthesis prompt — cap to last 20 messages to stay under token limits
+    const recentMessages = chatMessages.slice(-20);
+    const conversationText = recentMessages
       .map((m) => {
         const role = m.role === MessageRole.USER ? "Engineer" : "LogIQ";
-        const content = m.content.length > 3000 ? m.content.slice(0, 3000) + "\n[truncated]" : m.content;
+        const content = m.content.length > 1500 ? m.content.slice(0, 1500) + "\n[truncated]" : m.content;
         return `**${role}:** ${content}`;
       })
       .join("\n\n---\n\n");
@@ -90,11 +91,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         try {
           const anthropic = getAnthropic();
 
-          const messageStream = anthropic.messages.stream({
+          // Use the prompt-caching beta client so cache_control types are fully supported.
+          const messageStream = anthropic.beta.promptCaching.messages.stream({
             model: ANTHROPIC_MODEL,
-            max_tokens: ANTHROPIC_DEFAULTS.maxTokens,
+            max_tokens: 2048,
             temperature: 0.3,
-            system: RESOLUTION_SYSTEM_PROMPT,
+            system: [{ type: "text", text: RESOLUTION_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
             messages: [{ role: "user", content: userPrompt }],
           });
 

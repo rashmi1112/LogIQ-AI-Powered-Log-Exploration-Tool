@@ -30,7 +30,7 @@ const ChatBodySchema = z.object({
 });
 
 /** Hard cap on agentic turns so a misbehaving loop can't run forever. */
-const MAX_TURNS = 8;
+const MAX_TURNS = 10;
 
 /** Server-Sent Events payload encoder. */
 function sseEncode(event: string, data: unknown): string {
@@ -134,19 +134,35 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
           const anthropic = getAnthropic();
 
           // Prior turns provide memory; only the current turn carries full file context.
+          // cache_control on the user prompt caches the large log blob so agentic-loop
+          // turns 2-N read it from cache instead of re-processing it.
+          // SDK 0.32.x doesn't include cache_control in TextBlockParam types; the cast
+          // bridges the gap while preserving the property in the JSON sent to the API.
           const messages: Anthropic.MessageParam[] = [
             ...chatHistory,
-            { role: "user", content: userPrompt },
+            { role: "user", content: [{ type: "text" as const, text: userPrompt, cache_control: { type: "ephemeral" as const } }] as unknown as Array<Anthropic.TextBlockParam> },
           ];
 
           // Agentic loop: let Claude search the logs, then submit a structured analysis.
+          // forceSubmit makes the next turn call submit_analysis via tool_choice — used
+          // when the model has investigated but stalls without delivering a report.
+          let forceSubmit = false;
+          let nudgedToSubmit = false;
+
           for (let turn = 0; turn < MAX_TURNS; turn++) {
+            // On the final allowed turn, if we've gathered evidence but have no report
+            // yet, force the structured submission so the run can't end empty-handed.
+            if (turn === MAX_TURNS - 1 && !analysis && toolEvents.length > 0) {
+              forceSubmit = true;
+            }
+
             const messageStream = anthropic.messages.stream({
               model: ANTHROPIC_MODEL,
               max_tokens: ANTHROPIC_DEFAULTS.maxTokens,
               temperature: ANTHROPIC_DEFAULTS.temperature,
-              system: SYSTEM_PROMPT,
+              system: [{ type: "text" as const, text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" as const } }] as unknown as Anthropic.TextBlockParam[],
               tools: ANALYSIS_TOOLS,
+              tool_choice: forceSubmit ? { type: "tool", name: "submit_analysis" } : undefined,
               messages,
             });
 
@@ -161,7 +177,23 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
             const final = await messageStream.finalMessage();
             messages.push({ role: "assistant", content: final.content });
 
-            if (final.stop_reason !== "tool_use") break;
+            if (final.stop_reason !== "tool_use") {
+              // The model ended its turn with plain text instead of a tool call.
+              // If it had been investigating (ran searches) but never submitted a
+              // structured report, nudge it once to finish via submit_analysis —
+              // otherwise the user sees "let me compile the findings" and nothing else.
+              if (!analysis && toolEvents.length > 0 && !nudgedToSubmit) {
+                nudgedToSubmit = true;
+                forceSubmit = true;
+                messages.push({
+                  role: "user",
+                  content:
+                    "Finish now: call submit_analysis exactly once with your complete structured findings. Do not reply with plain text.",
+                });
+                continue;
+              }
+              break;
+            }
 
             // Execute every tool call in this turn and feed results back.
             const toolResults: Anthropic.ToolResultBlockParam[] = [];
@@ -182,7 +214,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
                 send("tool", { name: "search_logs", input: parsed.data });
                 toolEvents.push({ name: "search_logs", input: parsed.data });
                 const result = runSearchLogs(assembled.allRows, parsed.data);
-                toolResults.push({ type: "tool_result", tool_use_id: block.id, content: result.text });
+                // Truncate the content stored in the conversation history to cap token
+                // accumulation across turns. The model already processed the full result;
+                // the history only needs enough context to cite it. Full text goes to UI.
+                const historyContent = result.text.length > 3000
+                  ? result.text.slice(0, 3000) + "\n[truncated — raise limit or narrow query to see more]"
+                  : result.text;
+                toolResults.push({ type: "tool_result", tool_use_id: block.id, content: historyContent });
               } else if (block.name === "submit_analysis") {
                 const parsed = SubmitAnalysisInput.safeParse(block.input);
                 if (!parsed.success) {
